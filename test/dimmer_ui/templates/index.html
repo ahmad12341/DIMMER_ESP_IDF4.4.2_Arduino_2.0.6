@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css"
+          integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.min.js"
+            integrity="sha384-cuYeSxntonz0PPNlHhBs68uyIAVpIIOZZ5JqeqvYYIcEL727kskC66kF92t6Xl2V"
+            crossorigin="anonymous"></script>
+    <script
+            src="https://code.jquery.com/jquery-3.6.3.min.js"
+            integrity="sha256-pvPw+upLPUjgMXY0G+8O0xUf+/Im1MZjXxxgOcBQBXU="
+            crossorigin="anonymous"></script>
+    <script>
+        var wifiConfigured = false;
+        var token = "";
+        var deviceId = "default,";
+        var serialNo = "dimui";
+        var requestId = "123,";
+        
+        var relay_d_lock = 0
+        var relay_c_lock = 0
+        var relay_d_status = 0
+        var relay_c_status = 0
+        var relay_b_lock = 0
+        var relay_a_lock = 0
+        var relay_b_status = 0
+        var relay_a_status = 0
+
+
+        function sendCommandsMain(command_str) {
+            if (!wifiConfigured){
+                return $.ajax({
+                type: "POST",
+                url: "http://192.168.4.1",
+                data: command_str,
+                processData: false,
+                contentType: 'text/plain',
+                dataType: 'html',
+                success: function (data) {
+                    console.log(data);
+                    return data;
+                },
+                error: function (e) {
+                    console.log(e);
+                }
+                })
+            }else{
+                return $.ajax({
+                type: "POST",
+                url: `http://${serialNo}`,
+                data: requestId + deviceId + token + command_str, // Note this needs to include token & requestID
+                processData: false,
+                contentType: 'text/plain',
+                dataType: 'html',
+                success: function (data) {
+                    console.log(data);
+                    if(data.includes("D1") && !data.includes("FALSE")){
+                        let arr = data.split(",");
+                        token = arr.pop() + ',';
+                        console.log(`Token:${token}`);
+                        $('#current-token').text(token);
+                    }
+                },
+                error: function (e) {
+                    console.log(e);
+                }
+                })
+            }
+        }
+        
+        function decodeStatus(status_byte){
+            console.log(`Status Byte: ${status_byte}`);
+            relay_d_lock = (status_byte & 0b10000000) >> 7
+            relay_c_lock = (status_byte & 0b01000000) >> 6
+            relay_d_status = (status_byte & 0b00100000) >> 5
+            relay_c_status = (status_byte & 0b0010000) >> 4
+            relay_b_lock = (status_byte & 0b1000) >> 3
+            relay_a_lock = (status_byte & 0b0100) >> 2
+            relay_b_status = (status_byte & 0b0010) >> 1
+            relay_a_status = (status_byte & 0b0001)
+            console.log(relay_b_status);
+            $('#a-status').text(relay_a_status);
+            $('#b-status').text(relay_b_status);
+            $('#c-status').text(relay_c_status);
+            $('#d-status').text(relay_d_status);
+        }
+
+        function displayCurrentBrightness(brightness_arr){
+            $('#a-current-brightness').text(brightness_arr[0]);
+            $('#b-current-brightness').text(brightness_arr[1]);
+            $('#c-current-brightness').text(brightness_arr[2]);
+            $('#d-current-brightness').text(brightness_arr[3]);
+        }
+
+        async function getStatus(){
+            let statusResp = await sendCommandsMain(`3C`);
+            let arr = statusResp.split(",");
+            if(wifiConfigured){
+                console.log(arr[3]);
+                decodeStatus(parseInt(arr[3], 16));
+                displayCurrentBrightness(arr.slice(9, 13))
+                $('#current-draw').text(arr[4])
+            }else{
+                decodeStatus(parseInt(arr[2], 16));
+                displayCurrentBrightness(arr.slice(7, 11))
+                $('#current-draw').text(arr[3])
+            }
+            console.log("Async Function...");
+            console.log(statusResp);
+        }
+
+        function sendCommands(command_str) {
+            sendCommandsMain(command_str);
+            getStatus();
+        }
+
+        $(function () {
+            getStatus();
+
+            $('#scan').click(function () {
+                $.getJSON("http://127.0.0.1:5000/scan", function (data) {
+                    console.log(data);
+                    data["ssids"].forEach((ele) => {
+                        $('#ssid-select').append($('<option>', {
+                            value: ele,
+                            text: ele
+                        }));
+                    })
+                });
+            })
+
+            $('#connect').click(function () {
+                var ssid = $('#ssid-select').find(":selected").val();
+                $.get(`http://127.0.0.1:5000/connect/${ssid}`, function (data) {
+                    console.log(data);
+                });
+            })
+
+            $('#bulk-on').click(function () {
+                sendCommands('F1');
+            })
+            $('#bulk-off').click(function () {
+                sendCommands('F0');
+            })
+            $('#bulk-brightness').change(function () {
+                sendCommands(`F2,{"brightness":"${$('#bulk-brightness').val()}"}`);
+            })
+
+            $('#a-on').click(function () {
+                sendCommands('0E');
+            })
+            $('#a-off').click(function () {
+                sendCommands('0D');
+            })
+            $('#a-brightness').change(function () {
+                sendCommands(`0C,${$('#a-brightness').val()}`);
+            })
+
+            $('#b-on').click(function () {
+                sendCommands('1E');
+            })
+            $('#b-off').click(function () {
+                sendCommands('1D');
+            })
+            $('#b-brightness').change(function () {
+                sendCommands(`1C,${$('#b-brightness').val()}`);
+            })
+
+            $('#c-on').click(function () {
+                sendCommands('2E');
+            })
+            $('#c-off').click(function () {
+                sendCommands('2D');
+            })
+            $('#c-brightness').change(function () {
+                sendCommands(`2C,${$('#c-brightness').val()}`);
+            })
+
+            $('#d-on').click(function () {
+                sendCommands('3E');
+            })
+            $('#d-off').click(function () {
+                sendCommands('3D');
+            })
+            $('#d-brightness').change(function () {
+                sendCommands(`3C,${$('#d-brightness').val()}`);
+            })
+
+            //Tuning Values
+            $('#triac-pulse-percent').change(function () {
+                sendCommands(`C3,{"triacPulsePercentage": "${$('#triac-pulse-percent').val()}"}`);
+            })
+            $('#brightness-ceiling').change(function () {
+                sendCommands(`C3,{"brightnessCeilingPercentage": "${$('#brightness-ceiling').val()}"}`);
+            })
+            $('#brightness-floor').change(function () {
+                sendCommands(`C3,{"brightnessFloorPercentage": "${$('#brightness-floor').val()}"}`);
+            })
+            $('#triac-min-pulse').change(function () {
+                sendCommands(`C3,{"triacMinPulseMicroSeconds": "${$('#triac-min-pulse').val()}"}`);
+            })
+
+            $('#export-csv').click(function () {
+                let url = "";
+                let data = "";
+                if (!wifiConfigured){
+                    url = "http://192.168.4.1";
+                    data = 'C1';
+                }else{
+                    url = `http://${serialNo}`
+                    data = requestId + deviceId + token + 'C1'
+                }
+                $.ajax({
+                    type: "POST",
+                    url: url,
+                    data: data,
+                    processData: false,
+                    contentType: 'text/plain',
+                    dataType: 'html',
+                    success: function (data) {
+                        console.log(data);
+                        let i = data.indexOf('{');
+                        let obj = JSON.parse(data.slice(i));
+                        console.log(obj);
+                        let tuning_data = {
+                            bulbModel: $('#bulb-model').val(),
+                            triacPulsePercentage: obj["triacPulsePercentage"],
+                            brightnessCeilingPercentage: obj["brightnessCeilingPercentage"],
+                            brightnessFloorPercentage: obj["brightnessFloorPercentage"],
+                            triacMinPulseMicroSeconds: obj["triacMinPulseMicroSeconds"]
+                        }
+                        console.log(tuning_data);
+                        $.post(`http://127.0.0.1:5000/export`, JSON.stringify(tuning_data), function (res) {
+                            console.log(res);
+                        }, "json");
+                    },
+                    error: function (e) {
+                        console.log(e);
+                    }
+                })
+            })
+
+            $("#setup-btn").click(function () {
+                console.log("Setting Up Device!");
+                sendCommands(`D0,{"id": "123", "u":"default", "p":"default"}`);
+                sendCommands(`C3,{"wifiSSID": "${$('#ssid').val()}", "wifiPWD":"${$('#psk').val()}", "serialNo": "${serialNo}"}`);
+            });
+
+            $("#token-btn").click(function () {
+                console.log("Getting New Token.");
+                wifiConfigured = true;
+                sendCommands(`D1,{"id": "123", "u":"default", "p":"default"}`);
+            });
+
+
+            $("#upload-btn").click(function () {
+                if(!wifiConfigured){
+                    alert("You need to connect the device to WiFi before attempting OTA!");
+                    return;
+                }
+                var fd = new FormData();
+                var files = $('#file')[0].files[0];
+                fd.append('file', files);
+
+                $.ajax({
+                    url: 'http://127.0.0.1:5000/upload',
+                    type: 'post',
+                    data: fd,
+                    contentType: false,
+                    processData: false,
+                    success: function (response) {
+                        if (response != 0) {
+                            let obj =  JSON.parse(response)
+                            sendCommands(`C7,{"url":"http://${obj.ip}:5000/download/${obj.filename}"}`);
+                        } else {
+                            alert('file not uploaded');
+                        }
+                    },
+                });
+            });
+        });
+
+    </script>
+    <style>
+        .btn {
+            margin-bottom: 10px;
+            margin-top: 10px;
+
+        }
+
+        .min-width-btn {
+            min-width: 100px;
+        }
+
+        .bdr {
+            padding-top: 10px;
+            border-bottom: 1px solid lightgray;
+        }
+    </style>
+</head>
+<body>
+<div class="container pt-3">
+    <div class="row bdr">
+        <div class="col-4">
+            <h3>Connect AP</h3>
+            <label>Connect to the device in AP mode. If device is already configured with WiFi credientials use the Get Token button.</label>
+            <select class="form-select" id="ssid-select" aria-label="Default select example">
+                <option selected>Please Select the SSID</option>
+            </select>
+            <button class="btn btn-primary min-width-btn px-2" id="scan">Scan</button> <button class="btn btn-success min-width-btn px-2" id="connect">Connect</button>
+            <div class="py-3" style="border-top: 1px solid lightgray">
+                <h3>Bulk Commands</h3>
+                <span>Current Draw: <span id="current-draw">0</span>A</span>
+                <div class="mx-auto text-center">
+                    <button id="bulk-off" class="btn btn-danger mx-auto">ALL OFF</button>
+                    <button id="bulk-on" class="btn btn-success mx-auto">ALL ON</button>
+                </div>
+                <div>
+                    <label for="bulk-brightness" class="form-label">Bulk Brightness</label>
+                    <input type="range" min="0" max="100" value="100" class="form-range" id="bulk-brightness"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>%</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="pb-3">
+                <h3>Channel A</h3>
+                <span>Status: <span id="a-status">0</span></span><br>
+                <span>Current Brightness: <span id="a-current-brightness">0</span>%</span>
+                <div class="mx-auto text-center">
+                    <button id="a-off" class="btn btn-danger mx-auto">A OFF</button>
+                    <button id="a-on" class="btn btn-success mx-auto">A ON</button>
+                </div>
+                <div>
+                    <label for="a-brightness" class="form-label">Brightness</label>
+                    <input type="range" min="0" max="100" value="100" class="form-range" id="a-brightness"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>%</span>
+                </div>
+            </div>
+            <div class="pb-3">
+                <h3 class="pt-3" style="border-top: 1px solid lightgray">Channel B</h3>
+                <span>Status: <span id="b-status">0</span></span><br>
+                <span>Current Brightness: <span id="b-current-brightness">0</span>%</span>
+                <div class="mx-auto text-center">
+                    <button id="b-off" class="btn btn-danger mx-auto">B OFF</button>
+                    <button id="b-on" class="btn btn-success mx-auto">B ON</button>
+                </div>
+                <div>
+                    <label for="b-brightness" class="form-label">Brightness</label>
+                    <input type="range" min="0" max="100" value="100" class="form-range" id="b-brightness"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>%</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="pb-3">
+                <h3>Channel C</h3>
+                <span>Status: <span id="c-status">0</span></span><br>
+                <span>Current Brightness: <span id="c-current-brightness">0</span>%</span>
+                <div class="mx-auto text-center">
+                    <button id="c-off" class="btn btn-danger mx-auto">C OFF</button>
+                    <button id="c-on" class="btn btn-success mx-auto">C ON</button>
+                </div>
+                <div>
+                    <label for="c-brightness" class="form-label">Brightness</label>
+                    <input type="range" min="0" max="100" value="100" class="form-range" id="c-brightness"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>%</span>
+                </div>
+            </div>
+            <div class="pb-3">
+                <h3 class="pt-3" style="border-top: 1px solid lightgray">Channel D</h3>
+                <span>Status: <span id="d-status">0</span></span><br>
+                <span>Current Brightness: <span id="d-current-brightness">0</span>%</span>
+                <div class="mx-auto text-center">
+                    <button id="d-off" class="btn btn-danger mx-auto">D OFF</button>
+                    <button id="d-on" class="btn btn-success mx-auto">D ON</button>
+                </div>
+                <div>
+                    <label for="d-brightness" class="form-label">Brightness</label>
+                    <input type="range" min="0" max="100" value="100" class="form-range" id="d-brightness"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="bdr row">
+        <div class="col-7">
+            <h2>Dimmer Tuning</h2>
+            <div class="align-items-center">
+                <div class="bdr">
+                    <div>
+                        <label for="triac-pulse-percent" class="form-label">Triac Pulse Percentage</label>
+                        <input type="range" min="0" max="100" value="95" class="form-range" id="triac-pulse-percent"
+                               oninput="this.nextElementSibling.value = this.value">
+                        <output>95</output>
+                        <span>%</span>
+                    </div>
+                </div>
+                <div class="bdr">
+                    <label for="brightness-ceiling" class="form-label">Brightness Ceiling</label>
+                    <input type="range" min="0" max="100" value="95" class="form-range" id="brightness-ceiling"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>95</output>
+                    <span>%</span>
+                </div>
+                <div class="bdr">
+                    <label for="brightness-floor" class="form-label">Brightness Floor</label>
+                    <input type="range" min="0" max="100" value="5" class="form-range" id="brightness-floor"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>5</output>
+                    <span>%</span>
+                </div>
+                <div class="bdr">
+                    <label for="triac-min-pulse" class="form-label">Triac Minimum Pulse Microseconds</label>
+                    <input type="range" min="0" max="300" value="100" class="form-range" id="triac-min-pulse"
+                           oninput="this.nextElementSibling.value = this.value">
+                    <output>100</output>
+                    <span>uS</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-4">
+            <div class="bdr">
+                <h3>Export Result to CSV</h3>
+                <label>Append the current tuning configuration the tuning configurations .csv file.</label>
+                <input id="bulb-model" type="text" placeholder="bulb-model">
+                <button id="export-csv" class="btn btn-success">Export</button>
+            </div>
+            <div class="bdr">
+                <h3>Setup WiFi Mode</h3>
+                <label>Configure the device to use a WiFi network instead of AP mode.</label>
+                <div class="form-group">
+                    <label for="ssid">Enter SSID:</label>
+                    <input class="form-control" id="ssid" type="text" placeholder="ssid">
+                    <label for="psk">Enter Password:</label>
+                    <input class="form-control" id="psk" type="text" placeholder="psk">
+                </div>
+                <button id="setup-btn" class="btn btn-success">Setup Wifi</button>
+
+                <label>Once WiFi has been configured the device will reboot - after which you can aquire a token.</label>
+                <label style="font-weight: bold;">Current Token: <span id="current-token">None</span></label><br>
+                <button id="token-btn" class="btn btn-success">Get Token</button>
+            </div>
+            <div class="bdr">
+                <h3>OTA</h3>
+                <label>Upload a firmware file which will then be loaded onto the device. Please ensure the device has been configured to use wifi before using this.</label>
+                <input type="file" name="file" id="file">
+                <button id="upload-btn" class="btn btn-primary">Upload</button>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
